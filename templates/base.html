@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+
+<html>
+    <head>
+        <title>Blog App</title>
+    </head>
+
+    <body>
+        <h2>
+            Blog App: <a href="/">All Posts</a> | 
+            <a href="/newpost">Enter A New Post</a> | 
+            {% if logged_in %}
+                <a href="/logout">Log Out</a> | Welcome, {{logged_user}}.
+            {% else %}
+                <a href="/signup">Sign Up</a> |
+                <a href="/login">Log In</a>
+            {% endif %}
+        </h2>
+        <hr>
+
+        {% block content %}
+        {% endblock %}
+    </body>
+</html>

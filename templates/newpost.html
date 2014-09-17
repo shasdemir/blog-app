@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block content %}
+
+<!DOCTYPE html>
+
+<html>
+    <head>
+        <title>BlogApp: Submit A New Blog Entry</title>
+    </head>
+
+    <style type="text/css">
+        body {
+            font-family: sans-serif;
+            width: 800px;
+            margin: 0 auto;
+            padding: 10px;
+        }
+
+        .error {
+            color: red;
+        }
+
+        label {
+            display: block;
+            font-size: 20px;
+        }
+
+        input[type=text] {
+            width: 600px;
+            font-size: 20px;
+            padding: 2px;
+        }
+
+        textarea {
+            width: 600px;
+            height: 200px;
+            font-size: 17px;
+            font-family: sans-serif;
+        }
+
+        input[type=submit] {
+            font-size: 24px;
+        }
+
+        hr {
+            margin: 20px auto;
+        }
+
+        .art + .art {
+            margin-top: 50px;
+        }
+
+        .art-title {
+            font-weight: bold;
+            font-size: 20px;
+        }
+
+        .art-body {
+            margin: 0;
+            font-size: 17px;
+        }
+    </style>
+
+
+    <body>
+        <h2>Submit A New Blog Entry</h2>
+        <form method="post">
+            <label>
+                <div>Post Title:</div>
+                <input type="text" name="subject" value="{{post_title}}">
+            </label>
+
+            <br>
+
+            <label>
+                <div>Blog Post Text:</div>
+                <textarea name="content">{{post_text}}</textarea>
+            </label>
+
+            <div class="error">{{error_text}}</div>
+
+            <input type="submit">
+
+
+
+        </form>
+
+    <hr>
+
+    <!-- {% for art in arts %}
+        <div class="art">
+            <div class="art-title">{{art.title}}</div>
+            <pre class="art-body">{{art.art}}</pre>
+        </div>
+    {% endfor %} -->
+
+
+    </body>
+</html>
+{% endblock %}
