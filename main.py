@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 # todo: make each title a link to the post's permalink page
+# todo: After a new post, main page reads from DB once to fill the memcache. This is avoidable with smarter caching.
 
 # todo: multiple signups with the same user name has to be prevented (DONE)
 # todo: cookie-checking the signed-in user when posting (DONE)
@@ -15,12 +16,15 @@ import re
 import security_core
 import json
 import time
+import logging
 from google.appengine.api import memcache
 from google.appengine.ext import db
 
 
 template_dir = os.path.join(os.path.dirname(__file__), 'templates')
 jinja_env = jinja2.Environment(loader=jinja2.FileSystemLoader(template_dir), autoescape=True)
+
+log_db = False  # print the DB actions as warnings. Ignores DB reads for the JSON API.
 
 
 class BlogPost(db.Model):
@@ -58,17 +62,27 @@ class Handler(webapp2.RequestHandler):
         user_name_hash = self.request.cookies.get('username')
         return security_core.check_secure_val(user_name_hash) if user_name_hash else None
 
-    def get_all_posts(self, update=False):
+    def get_all_posts(self, update_with_post=None):  # update_with_post is a BlogPost to be appended to the posts cache.
         key = 'post_list'
+        client = memcache.Client()
         all_posts = memcache.get(key)
 
-        if all_posts is None or update:
-            all_posts = db.GqlQuery("SELECT * FROM BlogPost ORDER BY created DESC")
-            all_posts = list(all_posts)
-            memcache.set(key, all_posts)
-            memcache.set('time_key', time.time())
-            #time.sleep(1)
+        if all_posts is None:
+            all_posts = list(db.GqlQuery("SELECT * FROM BlogPost ORDER BY created DESC"))
+            if log_db:
+                logging.warning("DATABASE READ: All posts!")
 
+            if update_with_post is not None:
+                all_posts.append(update_with_post)
+            client.set(key, all_posts)
+            #client.set('time_key', time.time())
+        elif update_with_post is not None:
+            for k in xrange(100):
+                previous_posts = client.gets(key)
+                assert previous_posts is not None, "Cache was empty."
+                all_posts = previous_posts.append(update_with_post)
+                if client.cas(key, all_posts):
+                    break
         return all_posts
 
     def get_single_post(self, post_id, update=False):
@@ -77,9 +91,13 @@ class Handler(webapp2.RequestHandler):
 
         if single_post is None or update:
             single_post = BlogPost.get_by_id(post_id)
+
+            if log_db:
+                logging.warning("DATABASE READ: Single post!")
+
             memcache.set(key, single_post)
-            memcache.set(key + 'query_time', time.time())
-            # time.sleep(1)
+            #memcache.set(key + 'query_time', time.time())
+            # time.sleep(0.5)
 
         return single_post
 
@@ -102,11 +120,13 @@ class NewPostHandler(Handler):
         user_authentic = self.is_user_authentic()
 
         if post_text and post_title and user_authentic:
-            post = BlogPost(title=post_title, text=post_text.replace('\n', '<br>'), poster_name=user_authentic)
-            post.put()
-            self.get_all_posts(update=True)
+            new_post = BlogPost(title=post_title, text=post_text.replace('\n', '<br>'), poster_name=user_authentic)
+            self.get_all_posts(update_with_post=new_post)
+            new_post.put()
+            if log_db:
+                logging.warning("DATABASE WRITE")
 
-            self.redirect("/posts/%s" % str(post.key().id()))
+            self.redirect("/posts/%s" % str(new_post.key().id()))
         else:
             if not user_authentic:
                 self.redirect('/login?redirect=True')
@@ -129,19 +149,19 @@ class PermaLinkHandler(Handler):
         else:
             post_id = int(args[0])
             post_data = self.get_single_post(post_id=post_id)
-            query_time = memcache.get(str(post_id) + 'query_time')
-            elapsed = time.time() - query_time
+            #query_time = memcache.get(str(post_id) + 'query_time')
+            #elapsed = time.time() - query_time
 
-            self.render_permalink_page(post_data, logged_in=self.is_user_authentic(), elapsed_time=elapsed)
+            self.render_permalink_page(post_data, logged_in=self.is_user_authentic())  #, elapsed_time=elapsed)
 
 
 class MainPageHandler(Handler):
     def get(self):
         all_posts = self.get_all_posts()
-        query_time = memcache.get('time_key')
-        elapsed = time.time() - query_time
+        #query_time = memcache.get('time_key')
+        #elapsed = time.time() - query_time
 
-        self.render("postlist.html", all_posts=all_posts, logged_in=self.is_user_authentic(), elapsed_time=elapsed)
+        self.render("postlist.html", all_posts=all_posts, logged_in=self.is_user_authentic())  #, elapsed_time=elapsed)
 
 
 class MainJSONHandler(Handler):
@@ -183,6 +203,9 @@ class SignupHandler(Handler):
 
         def duplicate_username(raw_uname):
             matching_people = list(db.GqlQuery("SELECT * FROM BlogUser WHERE user_name = :user_name", user_name=raw_uname))
+            if log_db:
+                logging.warning("DATABASE READ: Users!")
+
             return len(matching_people) > 0
 
         e_username = self.request.get("username")
@@ -201,11 +224,13 @@ class SignupHandler(Handler):
 
             this_user = BlogUser(user_name=e_username, password_hash=security_core.make_pw_hash(e_username, e_password))
             this_user.put()
+            if log_db:
+                logging.warning("DATABASE Write: Single user!")
 
             uname_hashed = security_core.make_secure_val(e_username)
             self.response.headers.add_header('Set-Cookie', 'username=%s; Path=/' % uname_hashed)
-            #self.redirect("/")  # HW CHANGE
-            self.redirect("/welcome")  # HW CHANGE
+            self.redirect("/")  # HW CHANGE
+            #self.redirect("/welcome")  # HW CHANGE
         else:
             username_error = ''
             password_error = ''
@@ -256,6 +281,8 @@ class LoginHandler(Handler):
         e_username = e_username.encode('ascii', 'replace')
 
         matching_people = list(db.GqlQuery("SELECT * FROM BlogUser WHERE user_name = :user_name", user_name=e_username))
+        if log_db:
+            logging.warning("DATABASE READ: Single user!")
 
         username_matches = False
         password_mathces = False
@@ -275,8 +302,8 @@ class LoginHandler(Handler):
                 self.response.headers.add_header('Set-Cookie', 'blogapp_redirect_to_new_post=False')
                 self.redirect("/newpost")
             else:
-                #self.redirect("/")  # HW CHANGE
-                self.redirect("/welcome")  # HW CHANGE
+                self.redirect("/")  # HW CHANGE
+                #self.redirect("/welcome")  # HW CHANGE
         else:
             self.render_form(user_name=e_username, credentials_error="User name or password is invalid.")
 
