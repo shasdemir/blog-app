@@ -1,8 +1,11 @@
 #!/usr/bin/env python
 
 # todo: make each title a link to the post's permalink page
-# todo: After a new post, main page reads from DB once to fill the memcache. This is avoidable with smarter caching.
 
+# did: removed a bunch of debugging code
+# did: Permalink pages have smart caching. Now, no DB read is supposed to happen when a new post is submitted
+# did: secret used in cookie hashing is no longer in the repo.
+# todo: After a new post, main page reads from DB once to fill the memcache. This is avoidable with smarter caching. (FIXED)
 # todo: multiple signups with the same user name has to be prevented (DONE)
 # todo: cookie-checking the signed-in user when posting (DONE)
 # todo: and changing top bar according to login status (DONE)
@@ -25,8 +28,6 @@ template_dir = os.path.join(os.path.dirname(__file__), 'templates')
 jinja_env = jinja2.Environment(loader=jinja2.FileSystemLoader(template_dir), autoescape=True)
 
 log_db = False  # print the DB actions as warnings. Ignores DB reads for the JSON API.
-check_is_postlist_none = False  # check if memcache value is None for key: post_list, print to warning.
-debug_update_all_posts_cache = False
 
 
 class BlogPost(db.Model):
@@ -64,16 +65,6 @@ class Handler(webapp2.RequestHandler):
         user_name_hash = self.request.cookies.get('username')
         return security_core.check_secure_val(user_name_hash) if user_name_hash else None
 
-    def is_postlist_none(self, position="Nowhere"):
-        if check_is_postlist_none:
-            key = 'post_list'
-            client = memcache.Client()
-            all_posts = client.get(key)
-            if all_posts is None:
-                logging.warning('WTF post_list IS NONE NOW!!! POSITION: ' + position)
-            else:
-                logging.warning('post_list is not None! POSITION : ' + position)
-
     def get_all_posts(self):
         key = 'post_list'
         client = memcache.Client()
@@ -90,58 +81,39 @@ class Handler(webapp2.RequestHandler):
 
     def update_all_posts_cache(self, update_with_post):  # update_with_post is a BlogPost to be appended to the posts cache.
         key = 'post_list'
-        self.is_postlist_none(position="update_all_posts_cache, before new Client is created")
         client = memcache.Client()
-        self.is_postlist_none(position="update_all_posts_cache, after new Client is created")
 
         for k in xrange(100):
             previous_posts = client.gets(key)
-            self.is_postlist_none(position="after gets(key)")
             if previous_posts is None:
                 previous_posts = list(db.GqlQuery("SELECT * FROM BlogPost ORDER BY created DESC"))
                 if log_db:
                     logging.warning("DATABASE READ: All posts!")
 
-            if debug_update_all_posts_cache:
-                print "*********************"
-                print "previous_posts, just before cas:"
-                print str(previous_posts)
-                print "*********************"
-                print "*********************"
-                print "update_with_post, just before cas:"
-                print str(update_with_post)
-                print "*********************"
-
             # we don't append, because the posts must stay ordered as newest first
             all_posts = [update_with_post] + previous_posts
 
-            if debug_update_all_posts_cache:
-                print "*********************"
-                print "all_posts, just before cas:"
-                print str(all_posts)
-                print "*********************"
-
-            self.is_postlist_none(position="update_all_posts_cache, just before CAS")
             if client.cas(key, all_posts):
-                self.is_postlist_none(position="update_all_posts_cache, just after successful CAS")
                 break
-            self.is_postlist_none(position="update_all_posts_cache, just after unsuccessful CAS")
 
-    def get_single_post(self, post_id, update=False):
+    def get_single_post(self, post_id):
         key = str(post_id)
         single_post = memcache.get(key)
 
-        if single_post is None or update:
+        if single_post is None:
             single_post = BlogPost.get_by_id(post_id)
             if log_db:
                 logging.warning("DATABASE READ: Single post!")
 
             memcache.set(key, single_post)
-
         return single_post
 
-    #def update_single_post_cache(self, post_id):
-    #    key = str()
+    def update_single_post_cache(self, new_post):
+        try:
+            key = str(new_post.key().id())
+            memcache.set(key, new_post)
+        except:
+            logging.warning("Tried to update single post cache with id before saving to DB.")
 
 
 class NewPostHandler(Handler):
@@ -149,8 +121,6 @@ class NewPostHandler(Handler):
         self.render("newpost.html", post_title=post_title, post_text=post_text, error_text=error_text, logged_in=logged_in)
 
     def get(self):
-        self.is_postlist_none(position="NewPostHandler get()")
-
         user_authentic = self.is_user_authentic()
         if user_authentic:
             self.render_new_post(logged_in=user_authentic)
@@ -158,8 +128,6 @@ class NewPostHandler(Handler):
             self.redirect('/login?redirect=True')
 
     def post(self):
-        self.is_postlist_none(position="NewPostHandler post() the beginning")
-
         post_title = self.request.get("subject")
         post_text = self.request.get("content")
 
@@ -168,16 +136,13 @@ class NewPostHandler(Handler):
         if post_text and post_title and user_authentic:
             new_post = BlogPost(title=post_title, text=post_text.replace('\n', '<br>'), poster_name=user_authentic)
 
-            self.is_postlist_none(position="NewPostHandler post() before cache update")
-            self.update_all_posts_cache(update_with_post=new_post)
-            self.is_postlist_none(position="NewPostHandler post() after cache update")
-
-
             new_post.put()
             if log_db:
                 logging.warning("DATABASE WRITE")
 
-            self.is_postlist_none(position="NewPostHandler post() after db put")
+            self.update_all_posts_cache(update_with_post=new_post)
+            self.update_single_post_cache(new_post)
+
             self.redirect("/posts/%s" % str(new_post.key().id()))
         else:
             if not user_authentic:
@@ -199,19 +164,15 @@ class PermaLinkHandler(Handler):
             self.response.headers.add("Content-Type", "application/json; charset=UTF-8")
             self.response.write(post_data.to_json())
         else:
-            self.is_postlist_none(position="PermaLinkHandler get() BEFORE get_single_post()")
             post_id = int(args[0])
             post_data = self.get_single_post(post_id=post_id)
-            self.is_postlist_none(position="PermaLinkHandler get() AFTER get_single_post()")
 
             self.render_permalink_page(post_data, logged_in=self.is_user_authentic())  #, elapsed_time=elapsed)
 
 
 class MainPageHandler(Handler):
     def get(self):
-        self.is_postlist_none(position="MainPageHandler get() BEFORE get_all_posts()")
         all_posts = self.get_all_posts()
-        self.is_postlist_none(position="MainPageHandler get() AFTER get_all_posts()")
         #query_time = memcache.get('time_key')
         #elapsed = time.time() - query_time
 

@@ -12,14 +12,14 @@ import hashlib
 import hmac
 import random
 import string
+import secrets
 # from operator import _compare_digest as compare_digest # DOESNT WORK ON GAE
 
 # cookie hashing -------------------
-SECRET = 'allocation, fx, its, imode, smode = opt.fmin_slsqp(func=budget_objective, x0=initial_point,'  # random stuff
 
 
 def hash_str(s):
-    return hmac.new(SECRET, s, digestmod=hashlib.sha512).hexdigest()
+    return hmac.new(secrets.COOKIE_SECRET, s, digestmod=hashlib.sha512).hexdigest()
 
 
 def make_secure_val(s):
