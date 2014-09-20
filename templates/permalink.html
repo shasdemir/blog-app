@@ -5,7 +5,7 @@
 
 <html>
     <head>
-        <title>BlogApp: {{post_data.post_title}}</title>
+        <title>BlogApp: {{post_data.title}}</title>
     </head>
 
     <style type="text/css">
@@ -63,7 +63,7 @@
 
     <body>
 
-        <h2>{{post_data.title}}</h2>
+        <h2><a href="/posts/{{post_data.key().id()}}" style="color: #000000; text-decoration: none">{{post_data.title}}</a></h2>
         <h5>{{post_data.created.strftime("%b %d, %Y")}}.
             {% if post_data.poster_name %}
                 Posted by: {{post_data.poster_name}}

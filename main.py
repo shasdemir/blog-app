@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
-# todo: make each title a link to the post's permalink page
+# todo: make each title a link to the post's permalink page (DONE)
+# todo: convert DB requests from GQL to procedure calls for performance reasons
 
 # did: removed a bunch of debugging code
 # did: Permalink pages have smart caching. Now, no DB read is supposed to happen when a new post is submitted
