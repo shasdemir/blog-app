@@ -337,6 +337,11 @@ class FlushHandler(Handler):
         self.redirect('/')
 
 
+class TestHandler(Handler):
+    def get(self):
+        self.response.write("Hi")
+
+
 app = webapp2.WSGIApplication([
     ('/', MainPageHandler),
     ('/.json', MainJSONHandler),
@@ -346,5 +351,6 @@ app = webapp2.WSGIApplication([
     ('/login/?', LoginHandler),
     ('/logout/?', LogoutHandler),
     ('/welcome/?', WelcomeHandler),
-    ('/flush/?', FlushHandler)
+    ('/flush/?', FlushHandler),
+    ('/test/?', TestHandler)
 ], debug=True)
